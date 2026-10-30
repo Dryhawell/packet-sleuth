@@ -1,0 +1,6 @@
+# PacketSleuth runtime and test dependencies.
+# Python 3.12 or newer is required.
+# Optional libraries (pandas, matplotlib, streamlit, rich) are not included.
+
+scapy>=2.6.0
+pytest>=8.3.0
