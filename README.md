@@ -4,7 +4,7 @@ PacketSleuth is an offline, defensive network traffic analyzer. It will read PCA
 
 This repository is an educational Blue Team project. It analyzes captures you already have. It does not capture live traffic, decrypt TLS, upload packets, or contact external reputation services.
 
-**Current phase: 3 — PCAP reader.** The application can validate a capture and iterate its raw packets. Protocol parsing, statistics, detection, and reports are not implemented yet.
+**Current phase: 4 — packet parsing.** The application can read a capture and normalize Ethernet, ARP, IPv4, IPv6, TCP, UDP, and ICMP headers. DNS, HTTP, TLS, statistics, detection, and reports are not implemented yet.
 
 ## Why this project exists
 
@@ -25,7 +25,7 @@ A **PCAP** file is a recording of frames or packets with timestamps. **PCAPNG** 
 
 ## Architecture
 
-Later phases follow this flow. The entry point, logging, data models, and PCAP reader exist today. The reader still returns raw packets.
+Later phases follow this flow. The entry point, logging, data models, PCAP reader, and packet normalizer exist today. Application-layer fields stay empty until a later parser sees those headers.
 
 ```
 PCAP / PCAPNG
@@ -77,6 +77,10 @@ packet-sleuth/
 │   │   ├── __init__.py
 │   │   ├── file_validator.py
 │   │   └── pcap_reader.py
+│   ├── parsers/
+│   │   ├── __init__.py
+│   │   ├── packet_parser.py
+│   │   └── protocol_parser.py
 │   └── utils/
 │       ├── __init__.py
 │       └── logger.py
@@ -87,10 +91,11 @@ packet-sleuth/
 └── tests/
     ├── __init__.py
     ├── test_models.py
-    └── test_pcap_reader.py
+    ├── test_pcap_reader.py
+    └── test_packet_parser.py
 ```
 
-The reader checks the file header and iterates raw packets. It does not modify the capture and it does not build the normalized `Packet` model. Parsers, analysis, detection, and the command-line interface are added in their own phases.
+The reader checks the file header and iterates raw packets. The parser turns each frame into a `Packet`. It names only headers that are present. DNS, HTTP, and TLS parsers, statistics, detection, and the command-line interface are added in their own phases.
 
 ## Requirements
 
@@ -147,6 +152,19 @@ with CaptureReader("data/samples/sample.pcap") as capture:
 ```
 
 `.pcap` and `.pcapng` are both accepted. The first bytes of the file choose the reader. A matching extension is checked, but it is not treated as proof. Compressed captures are rejected. The source file is opened read-only.
+
+## Packet parsing
+
+```python
+from packetsleuth.capture import CaptureReader
+from packetsleuth.parsers import parse_frames
+
+with CaptureReader("data/samples/sample.pcap") as capture:
+    for packet in parse_frames(capture):
+        print(packet.packet_number, packet.protocol.value, packet.source_ip, packet.destination_port)
+```
+
+The parser reads Ethernet, ARP, IPv4, IPv6, TCP, UDP, ICMP, and ICMPv6 from the decoded headers. Port 53 does not become DNS, and port 443 does not become TLS. An ICMP error keeps its own addresses. A TCP header quoted inside that error is not treated as this frame's transport. The first network header is kept when one IP packet carries another.
 
 ## Testing
 

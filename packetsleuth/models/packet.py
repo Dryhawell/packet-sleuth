@@ -140,8 +140,9 @@ class Packet:
         packet_length: Observed length in bytes.
         timestamp: Capture time. ``None`` when the file has no timestamp.
         layers: Protocol layers actually identified.
-        source_ip: IPv4 or IPv6 source. ``None`` when the frame has no IP layer.
-        destination_ip: IPv4 or IPv6 destination.
+        source_ip: IPv4 or IPv6 source, or the ARP sender protocol address.
+            ``None`` when the frame has neither.
+        destination_ip: IPv4 or IPv6 destination, or the ARP target protocol address.
         source_port: Transport source port.
         destination_port: Transport destination port.
         ttl: IPv4 TTL or IPv6 hop limit.
