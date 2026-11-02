@@ -1,7 +1,7 @@
 """Normalize one captured frame into a PacketSleuth ``Packet``.
 
-DNS, HTTP, and TLS are left empty. Those fields are filled only when a
-later parser sees the corresponding application header.
+Application fields are filled only from a DNS message, an HTTP start line,
+or a TLS record in this frame. Ports do not select those protocols.
 """
 
 from __future__ import annotations
@@ -10,10 +10,10 @@ import logging
 from collections.abc import Iterable, Iterator
 
 from scapy.layers.inet import TCP
-from scapy.packet import Packet as ScapyPacket
+from scapy.packet import NoPayload, Packet as ScapyPacket
 
 from packetsleuth.capture.pcap_reader import CapturedFrame
-from packetsleuth.models.enums import TcpFlag
+from packetsleuth.models.enums import Protocol, TcpFlag
 from packetsleuth.models.packet import Packet
 from packetsleuth.models.validation import (
     ModelValidationError,
@@ -22,7 +22,10 @@ from packetsleuth.models.validation import (
     require_port,
     require_ttl,
 )
+from packetsleuth.parsers.dns_parser import parse_dns_metadata
+from packetsleuth.parsers.http_parser import parse_http_metadata
 from packetsleuth.parsers.protocol_parser import LayerView, inspect_layers
+from packetsleuth.parsers.tls_parser import parse_tls_metadata
 
 logger = logging.getLogger("packetsleuth.parsers")
 
@@ -88,8 +91,9 @@ def _fields_from_view(view: LayerView) -> dict[str, object]:
     source_mac, destination_mac = _mac_addresses(view)
     source_ip, destination_ip, ttl = _network_fields(view)
     source_port, destination_port, tcp_flags = _transport_fields(view)
+    layers, application = _application_fields(view)
     return {
-        "layers": view.layers,
+        "layers": layers,
         "source_mac": source_mac,
         "destination_mac": destination_mac,
         "source_ip": source_ip,
@@ -98,6 +102,7 @@ def _fields_from_view(view: LayerView) -> dict[str, object]:
         "source_port": source_port,
         "destination_port": destination_port,
         "tcp_flags": tcp_flags,
+        **application,
     }
 
 
@@ -143,6 +148,45 @@ def _attr(layer: object, name: str) -> object:
         return getattr(layer, name)
     except Exception:
         return None
+
+
+def _application_fields(view: LayerView) -> tuple[tuple[Protocol, ...], dict[str, object]]:
+    """Add at most one application protocol found in this frame's payload."""
+    transport = view.tcp if view.tcp is not None else view.udp
+    if transport is None:
+        return view.layers, {}
+    payload = _payload_bytes(transport)
+    if view.tcp is not None:
+        http = parse_http_metadata(payload)
+        if http is not None:
+            return (*view.layers, Protocol.HTTP), {
+                "http_method": http.method,
+                "http_host": http.host,
+                "http_path": http.path,
+            }
+        tls = parse_tls_metadata(payload)
+        if tls is not None:
+            return (*view.layers, Protocol.TLS), {"tls_metadata": tls}
+    dns = parse_dns_metadata(payload, length_prefixed=view.tcp is not None)
+    if dns is not None:
+        return (*view.layers, Protocol.DNS), {
+            "dns_query": dns.query_name,
+            "dns_response": dns.response_summary,
+        }
+    return view.layers, {}
+
+
+def _payload_bytes(transport: object) -> bytes:
+    payload = getattr(transport, "payload", None)
+    if payload is None or isinstance(payload, NoPayload):
+        return b""
+    original = getattr(payload, "original", b"")
+    if isinstance(original, (bytes, bytearray)) and original:
+        return bytes(original)
+    try:
+        return bytes(payload)
+    except Exception:
+        return b""
 
 
 def _tcp_flags(tcp: TCP) -> frozenset[TcpFlag] | None:

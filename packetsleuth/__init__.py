@@ -1,7 +1,7 @@
 """PacketSleuth — offline network traffic analyzer.
 
-This package is the application core. Phase 4 normalizes Ethernet, ARP,
-IP, TCP, UDP, and ICMP headers. Application-layer parsing and detection
+This package is the application core. Phase 5 reads DNS, plaintext HTTP,
+and visible TLS metadata from packet payloads. Statistics and detection
 arrive in later phases.
 """
 

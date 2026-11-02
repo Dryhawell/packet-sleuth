@@ -1,7 +1,7 @@
 """Parsers that turn raw frames into normalized records.
 
-Phase 4 covers Ethernet, ARP, IPv4, IPv6, TCP, UDP, and ICMP. Application
-protocols are added in later phases.
+Link, network, and transport headers are read from decoded layers.
+DNS, plaintext HTTP, and TLS metadata are read from the payload.
 """
 
 from packetsleuth.parsers.packet_parser import parse_frame, parse_frames

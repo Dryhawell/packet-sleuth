@@ -4,7 +4,7 @@ PacketSleuth is an offline, defensive network traffic analyzer. It will read PCA
 
 This repository is an educational Blue Team project. It analyzes captures you already have. It does not capture live traffic, decrypt TLS, upload packets, or contact external reputation services.
 
-**Current phase: 4 — packet parsing.** The application can read a capture and normalize Ethernet, ARP, IPv4, IPv6, TCP, UDP, and ICMP headers. DNS, HTTP, TLS, statistics, detection, and reports are not implemented yet.
+**Current phase: 5 — protocol analysis.** The application can read a capture and normalize Ethernet through TCP/UDP, plus DNS, plaintext HTTP, and visible TLS metadata. Statistics, detection, and reports are not implemented yet.
 
 ## Why this project exists
 
@@ -25,7 +25,7 @@ A **PCAP** file is a recording of frames or packets with timestamps. **PCAPNG** 
 
 ## Architecture
 
-Later phases follow this flow. The entry point, logging, data models, PCAP reader, and packet normalizer exist today. Application-layer fields stay empty until a later parser sees those headers.
+Later phases follow this flow. The entry point, logging, data models, PCAP reader, and packet normalizer exist today. DNS, HTTP, and TLS fields are filled only when those payloads are visible in the frame.
 
 ```
 PCAP / PCAPNG
@@ -79,8 +79,11 @@ packet-sleuth/
 │   │   └── pcap_reader.py
 │   ├── parsers/
 │   │   ├── __init__.py
+│   │   ├── dns_parser.py
+│   │   ├── http_parser.py
 │   │   ├── packet_parser.py
-│   │   └── protocol_parser.py
+│   │   ├── protocol_parser.py
+│   │   └── tls_parser.py
 │   └── utils/
 │       ├── __init__.py
 │       └── logger.py
@@ -92,10 +95,12 @@ packet-sleuth/
     ├── __init__.py
     ├── test_models.py
     ├── test_pcap_reader.py
-    └── test_packet_parser.py
+    ├── test_packet_parser.py
+    ├── test_dns_parser.py
+    └── test_http_parser.py
 ```
 
-The reader checks the file header and iterates raw packets. The parser turns each frame into a `Packet`. It names only headers that are present. DNS, HTTP, and TLS parsers, statistics, detection, and the command-line interface are added in their own phases.
+The reader checks the file header and iterates raw packets. The parser turns each frame into a `Packet` and names a protocol only when its header or payload is present. Statistics, detection, and the command-line interface are added in their own phases.
 
 ## Requirements
 
@@ -164,7 +169,9 @@ with CaptureReader("data/samples/sample.pcap") as capture:
         print(packet.packet_number, packet.protocol.value, packet.source_ip, packet.destination_port)
 ```
 
-The parser reads Ethernet, ARP, IPv4, IPv6, TCP, UDP, ICMP, and ICMPv6 from the decoded headers. Port 53 does not become DNS, and port 443 does not become TLS. An ICMP error keeps its own addresses. A TCP header quoted inside that error is not treated as this frame's transport. The first network header is kept when one IP packet carries another.
+The parser reads Ethernet, ARP, IPv4, IPv6, TCP, UDP, ICMP, and ICMPv6 from the decoded headers. DNS is recognized from a DNS message, plaintext HTTP from its start line, and TLS from a TLS record. Port 53 does not become DNS, and port 443 does not become TLS. An ICMP error keeps its own addresses. A TCP header quoted inside that error is not treated as this frame's transport. The first network header is kept when one IP packet carries another.
+
+TCP flag bits already observed on the header stay on the packet: SYN, ACK, FIN, RST, PSH, and URG. A single SYN is not a scan. Cookie and Authorization headers are not copied into the record. TLS application data is not decrypted. A ClientHello can show the server name; a capture that starts later will not, and that absence is not treated as a flaw.
 
 ## Testing
 
