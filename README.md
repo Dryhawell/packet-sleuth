@@ -4,7 +4,7 @@ PacketSleuth is an offline, defensive network traffic analyzer. It will read PCA
 
 This repository is an educational Blue Team project. It analyzes captures you already have. It does not capture live traffic, decrypt TLS, upload packets, or contact external reputation services.
 
-**Current phase: 2 — data models.** The application starts, writes a log, and can represent a packet, a flow, an alert, and an analysis result. Packet reading, parsing, statistics, detection, and reports are not implemented yet.
+**Current phase: 3 — PCAP reader.** The application can validate a capture and iterate its raw packets. Protocol parsing, statistics, detection, and reports are not implemented yet.
 
 ## Why this project exists
 
@@ -25,7 +25,7 @@ A **PCAP** file is a recording of frames or packets with timestamps. **PCAPNG** 
 
 ## Architecture
 
-Later phases follow this flow. The entry point, logging, and normalized data models exist today.
+Later phases follow this flow. The entry point, logging, data models, and PCAP reader exist today. The reader still returns raw packets.
 
 ```
 PCAP / PCAPNG
@@ -73,6 +73,10 @@ packet-sleuth/
 │   │   ├── enums.py
 │   │   ├── packet.py
 │   │   └── validation.py
+│   ├── capture/
+│   │   ├── __init__.py
+│   │   ├── file_validator.py
+│   │   └── pcap_reader.py
 │   └── utils/
 │       ├── __init__.py
 │       └── logger.py
@@ -82,10 +86,11 @@ packet-sleuth/
 ├── logs/
 └── tests/
     ├── __init__.py
-    └── test_models.py
+    ├── test_models.py
+    └── test_pcap_reader.py
 ```
 
-The model layer describes observations. It does not open captures. Parsers, analysis, detection, and the command-line interface are added in their own phases.
+The reader checks the file header and iterates raw packets. It does not modify the capture and it does not build the normalized `Packet` model. Parsers, analysis, detection, and the command-line interface are added in their own phases.
 
 ## Requirements
 
@@ -127,6 +132,21 @@ Normalized records live in `packetsleuth.models`:
 - `AnalysisResult` — the records collected for one capture
 
 These objects do not contain raw payloads, cookies, or credentials. A risk score can be stored only together with a written explanation. Scoring itself is a later phase.
+
+## Reading a capture
+
+There is still no `analyze` command. The reader is available to Python:
+
+```python
+from packetsleuth.capture import CaptureReader
+
+with CaptureReader("data/samples/sample.pcap") as capture:
+    for frame in capture:
+        print(frame.packet_number, frame.timestamp)
+    print(capture.file_format, capture.packet_count, capture.issues)
+```
+
+`.pcap` and `.pcapng` are both accepted. The first bytes of the file choose the reader. A matching extension is checked, but it is not treated as proof. Compressed captures are rejected. The source file is opened read-only.
 
 ## Testing
 
