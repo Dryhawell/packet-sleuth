@@ -4,7 +4,7 @@ PacketSleuth is an offline, defensive network traffic analyzer. It will read PCA
 
 This repository is an educational Blue Team project. It analyzes captures you already have. It does not capture live traffic, decrypt TLS, upload packets, or contact external reputation services.
 
-**Current phase: 5 — protocol analysis.** The application can read a capture and normalize Ethernet through TCP/UDP, plus DNS, plaintext HTTP, and visible TLS metadata. Statistics, detection, and reports are not implemented yet.
+**Current phase: 6 — IP analysis.** The application can read a capture, normalize headers, and classify IP addresses. It also summarizes IPv4, IPv6, TTL, and fragmentation. Broader traffic statistics, detection, and reports are not implemented yet.
 
 ## Why this project exists
 
@@ -84,6 +84,9 @@ packet-sleuth/
 │   │   ├── packet_parser.py
 │   │   ├── protocol_parser.py
 │   │   └── tls_parser.py
+│   ├── analysis/
+│   │   ├── __init__.py
+│   │   └── ip_analyzer.py
 │   └── utils/
 │       ├── __init__.py
 │       └── logger.py
@@ -97,7 +100,8 @@ packet-sleuth/
     ├── test_pcap_reader.py
     ├── test_packet_parser.py
     ├── test_dns_parser.py
-    └── test_http_parser.py
+    ├── test_http_parser.py
+    └── test_ip_analysis.py
 ```
 
 The reader checks the file header and iterates raw packets. The parser turns each frame into a `Packet` and names a protocol only when its header or payload is present. Statistics, detection, and the command-line interface are added in their own phases.
@@ -172,6 +176,22 @@ with CaptureReader("data/samples/sample.pcap") as capture:
 The parser reads Ethernet, ARP, IPv4, IPv6, TCP, UDP, ICMP, and ICMPv6 from the decoded headers. DNS is recognized from a DNS message, plaintext HTTP from its start line, and TLS from a TLS record. Port 53 does not become DNS, and port 443 does not become TLS. An ICMP error keeps its own addresses. A TCP header quoted inside that error is not treated as this frame's transport. The first network header is kept when one IP packet carries another.
 
 TCP flag bits already observed on the header stay on the packet: SYN, ACK, FIN, RST, PSH, and URG. A single SYN is not a scan. Cookie and Authorization headers are not copied into the record. TLS application data is not decrypted. A ClientHello can show the server name; a capture that starts later will not, and that absence is not treated as a flaw.
+
+## IP analysis
+
+```python
+from packetsleuth.analysis import analyze_ips
+from packetsleuth.capture import CaptureReader
+from packetsleuth.parsers import parse_frames
+
+with CaptureReader("data/samples/sample.pcap") as capture:
+    summary = analyze_ips(list(parse_frames(capture)))
+print(summary.ipv4_packets, summary.ipv6_packets, summary.most_common_ttl)
+for item in summary.addresses:
+    print(item.address, item.classification.value, item.packet_count)
+```
+
+Each address receives one label: public, private, loopback, link-local, multicast, or reserved. Documentation ranges such as `192.0.2.0/24` are reserved. A private address is not evidence that the traffic is safe, and a public address is not evidence that it is hostile. The observed TTL is the value after routers have decreased it. It is not an operating-system identification. ARP addresses are not counted as IP packets.
 
 ## Testing
 

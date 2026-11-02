@@ -59,6 +59,8 @@ _PACKET_FIELDS = {
     "destination_port",
     "packet_length",
     "ttl",
+    "fragment_offset",
+    "more_fragments",
     "tcp_flags",
     "dns_query",
     "dns_response",
@@ -146,6 +148,8 @@ class Packet:
         source_port: Transport source port.
         destination_port: Transport destination port.
         ttl: IPv4 TTL or IPv6 hop limit.
+        fragment_offset: Fragment byte offset. ``None`` when no IP header was parsed.
+        more_fragments: Whether the IP header says another fragment follows.
         tcp_flags: Flags on a TCP packet. ``None`` when the packet is not TCP
             or the flags could not be read. An empty set means TCP with no
             control flags set.
@@ -168,6 +172,8 @@ class Packet:
     source_port: int | None = None
     destination_port: int | None = None
     ttl: int | None = None
+    fragment_offset: int | None = None
+    more_fragments: bool | None = None
     tcp_flags: frozenset[TcpFlag] | None = None
     dns_query: str | None = None
     dns_response: str | None = None
@@ -200,6 +206,13 @@ class Packet:
             require_port(self.destination_port, "destination_port"),
         )
         object.__setattr__(self, "ttl", require_ttl(self.ttl))
+        fragment_offset, more_fragments = _normalize_fragment(
+            self.fragment_offset,
+            self.more_fragments,
+            layers,
+        )
+        object.__setattr__(self, "fragment_offset", fragment_offset)
+        object.__setattr__(self, "more_fragments", more_fragments)
         object.__setattr__(self, "tcp_flags", flags)
         object.__setattr__(
             self,
@@ -249,6 +262,8 @@ class Packet:
             "destination_port": self.destination_port,
             "packet_length": self.packet_length,
             "ttl": self.ttl,
+            "fragment_offset": self.fragment_offset,
+            "more_fragments": self.more_fragments,
             "tcp_flags": None
             if self.tcp_flags is None
             else [flag.value for flag in sorted(self.tcp_flags, key=lambda item: item.value)],
@@ -290,6 +305,8 @@ class Packet:
             source_port=_optional_port(payload, "source_port"),
             destination_port=_optional_port(payload, "destination_port"),
             ttl=_optional_port(payload, "ttl"),
+            fragment_offset=_optional_port(payload, "fragment_offset"),
+            more_fragments=_optional_bool(payload, "more_fragments"),
             tcp_flags=_flags_from_payload(payload),
             dns_query=_optional_string(payload, "dns_query"),
             dns_response=_optional_string(payload, "dns_response"),
@@ -314,6 +331,33 @@ def _optional_string(payload: Mapping[str, object], field_name: str) -> str | No
         return None
     if not isinstance(value, str):
         raise ModelValidationError(f"{field_name} must be a string or null")
+    return value
+
+
+def _normalize_fragment(
+    offset: object,
+    more_fragments: object,
+    layers: Sequence[Protocol],
+) -> tuple[int | None, bool | None]:
+    if offset is None and more_fragments is None:
+        return None, None
+    if offset is None or more_fragments is None:
+        raise ModelValidationError("fragment_offset and more_fragments must be set together")
+    if not isinstance(more_fragments, bool):
+        raise ModelValidationError("more_fragments must be a boolean or null")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ModelValidationError("fragment_offset must be a non-negative integer")
+    if Protocol.IPV4 not in layers and Protocol.IPV6 not in layers:
+        raise ModelValidationError("fragment fields require an IPv4 or IPv6 layer")
+    return offset, more_fragments
+
+
+def _optional_bool(payload: Mapping[str, object], field_name: str) -> bool | None:
+    if field_name not in payload or payload[field_name] is None:
+        return None
+    value = payload[field_name]
+    if not isinstance(value, bool):
+        raise ModelValidationError(f"{field_name} must be a boolean or null")
     return value
 
 

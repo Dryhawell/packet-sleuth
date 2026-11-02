@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Iterator
 
-from scapy.layers.inet import TCP
+from scapy.layers.inet import ICMP, IP, TCP, UDP
+from scapy.layers.inet6 import IPv6, IPv6ExtHdrFragment
 from scapy.packet import NoPayload, Packet as ScapyPacket
 
 from packetsleuth.capture.pcap_reader import CapturedFrame
@@ -90,6 +91,7 @@ def _safe_view(frame: CapturedFrame) -> LayerView:
 def _fields_from_view(view: LayerView) -> dict[str, object]:
     source_mac, destination_mac = _mac_addresses(view)
     source_ip, destination_ip, ttl = _network_fields(view)
+    fragment_offset, more_fragments = _fragment_fields(view)
     source_port, destination_port, tcp_flags = _transport_fields(view)
     layers, application = _application_fields(view)
     return {
@@ -99,6 +101,8 @@ def _fields_from_view(view: LayerView) -> dict[str, object]:
         "source_ip": source_ip,
         "destination_ip": destination_ip,
         "ttl": ttl,
+        "fragment_offset": fragment_offset,
+        "more_fragments": more_fragments,
         "source_port": source_port,
         "destination_port": destination_port,
         "tcp_flags": tcp_flags,
@@ -130,6 +134,59 @@ def _network_fields(view: LayerView) -> tuple[str | None, str | None, int | None
     if view.arp is not None:
         return _optional_ip(_attr(view.arp, "psrc")), _optional_ip(_attr(view.arp, "pdst")), None
     return None, None, None
+
+
+def _fragment_fields(view: LayerView) -> tuple[int | None, bool | None]:
+    """Return the fragment byte offset and the more-fragments flag.
+
+    IPv4 and IPv6 store the offset in 8-byte units. The packet record uses
+    bytes. Both values stay empty when the frame has no IP header.
+    """
+    if view.ipv4 is not None:
+        return _ipv4_fragment(view.ipv4)
+    if view.ipv6 is not None:
+        return _ipv6_fragment(view.ipv6)
+    return None, None
+
+
+def _ipv4_fragment(ipv4: IP) -> tuple[int | None, bool | None]:
+    offset_units = _attr(ipv4, "frag")
+    if isinstance(offset_units, bool) or not isinstance(offset_units, int) or offset_units < 0:
+        return None, None
+    flags = _attr(ipv4, "flags")
+    try:
+        more = flags is not None and "MF" in flags
+    except Exception:
+        return None, None
+    return offset_units * 8, bool(more)
+
+
+def _ipv6_fragment(ipv6: IPv6) -> tuple[int | None, bool | None]:
+    header = _ipv6_fragment_header(ipv6)
+    if header is None:
+        return 0, False
+    offset_units = _attr(header, "offset")
+    more = _attr(header, "m")
+    if isinstance(offset_units, bool) or not isinstance(offset_units, int) or offset_units < 0:
+        return None, None
+    if isinstance(more, bool):
+        more_fragments = more
+    elif isinstance(more, int) and not isinstance(more, bool):
+        more_fragments = more != 0
+    else:
+        return None, None
+    return offset_units * 8, more_fragments
+
+
+def _ipv6_fragment_header(ipv6: IPv6) -> IPv6ExtHdrFragment | None:
+    current = getattr(ipv6, "payload", None)
+    while current is not None and not isinstance(current, NoPayload):
+        if isinstance(current, IPv6ExtHdrFragment):
+            return current
+        if isinstance(current, (IP, IPv6, TCP, UDP, ICMP)):
+            break
+        current = getattr(current, "payload", None)
+    return None
 
 
 def _transport_fields(
